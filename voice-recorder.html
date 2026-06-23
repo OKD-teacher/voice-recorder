@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ボイスレコーダー</title>
+  <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px;
+    }
+    h1 { font-size: 1.4rem; font-weight: 600; margin-bottom: 6px; color: #a78bfa; }
+    .subtitle { font-size: 0.8rem; color: #6b7280; margin-bottom: 20px; text-align: center; }
+
+    .recorder-card {
+      background: #16213e;
+      border-radius: 20px;
+      padding: 32px 28px;
+      width: 100%;
+      max-width: 480px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    }
+
+    .timer {
+      text-align: center;
+      font-size: 3rem;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.05em;
+      margin-bottom: 20px;
+      color: #e2e8f0;
+    }
+    .timer.recording { color: #f87171; }
+
+    .visualizer {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      height: 56px;
+      margin-bottom: 22px;
+    }
+    .bar { width: 5px; background: #4f46e5; border-radius: 3px; height: 4px; transition: height 0.08s; }
+    .recording .bar { background: #f87171; }
+
+    .status-bar {
+      text-align: center;
+      font-size: 0.82rem;
+      color: #6b7280;
+      margin-bottom: 16px;
+      min-height: 18px;
+    }
+    .status-bar.error { color: #f87171; }
+    .status-bar.ok    { color: #34d399; }
+
+    .controls {
+      display: flex;
+      justify-content: center;
+      gap: 20px;
+      margin-bottom: 28px;
+    }
+    .btn {
+      border: none; border-radius: 50%;
+      cursor: pointer; display: flex;
+      align-items: center; justify-content: center;
+      transition: transform 0.12s, opacity 0.2s;
+    }
+    .btn:active { transform: scale(0.93); }
+    .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .btn-record {
+      width: 72px; height: 72px;
+      background: #4f46e5;
+      box-shadow: 0 0 0 6px rgba(79,70,229,0.25);
+    }
+    .btn-record.active {
+      background: #dc2626;
+      box-shadow: 0 0 0 6px rgba(220,38,38,0.25);
+    }
+    .btn-record svg { width: 28px; height: 28px; fill: #fff; }
+    .btn-sm { width: 56px; height: 56px; background: #374151; }
+    .btn-sm svg { width: 22px; height: 22px; fill: #d1d5db; }
+
+    .drive-hint {
+      background: #0f172a;
+      border: 1px solid #1e3a2f;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 0.78rem;
+      color: #6b7280;
+      margin-bottom: 20px;
+      line-height: 1.6;
+    }
+    .drive-hint strong { color: #4ade80; }
+
+    .recordings-header {
+      font-size: 0.8rem; text-transform: uppercase;
+      letter-spacing: 0.1em; color: #6b7280; margin-bottom: 10px;
+    }
+    .recordings-list {
+      display: flex; flex-direction: column;
+      gap: 10px; max-height: 360px; overflow-y: auto;
+    }
+    .recording-item {
+      background: #0f172a;
+      border-radius: 12px;
+      padding: 12px 14px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .recording-meta {
+      display: flex; justify-content: space-between;
+      align-items: center; font-size: 0.82rem; color: #9ca3af;
+    }
+    .recording-name { font-size: 0.9rem; font-weight: 500; color: #e2e8f0; }
+    audio { width: 100%; height: 32px; accent-color: #4f46e5; }
+    .recording-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .action-btn {
+      background: none; border: 1px solid #374151;
+      border-radius: 8px; color: #9ca3af;
+      font-size: 0.78rem; padding: 4px 10px;
+      cursor: pointer; transition: background 0.15s, color 0.15s; white-space: nowrap;
+    }
+    .action-btn:hover { background: #1e293b; color: #e2e8f0; }
+    .action-btn.dl { border-color: #1e7b34; color: #4ade80; }
+    .action-btn.dl:hover { background: #14532d; }
+    .action-btn.delete:hover { border-color: #ef4444; color: #ef4444; }
+    .empty-state { text-align: center; color: #4b5563; font-size: 0.88rem; padding: 20px 0; }
+  </style>
+</head>
+<body>
+  <h1>🎙 ボイスレコーダー</h1>
+  <p class="subtitle">録音後にMP3でダウンロード → Google Driveへ移動</p>
+
+  <div class="recorder-card">
+    <div class="timer" id="timer">00:00</div>
+    <div class="visualizer" id="visualizer"></div>
+    <div class="status-bar" id="statusBar">録音ボタンを押して開始</div>
+
+    <div class="controls">
+      <button class="btn btn-sm" id="btnPause" disabled>
+        <svg viewBox="0 0 24 24" id="pauseIcon">
+          <rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>
+        </svg>
+      </button>
+      <button class="btn btn-record" id="btnRecord">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>
+      </button>
+      <button class="btn btn-sm" id="btnStop" disabled>
+        <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+      </button>
+    </div>
+
+    <div class="drive-hint">
+      💾 録音後に <strong>「MP3ダウンロード」</strong> ボタンを押す<br>
+      📁 ダウンロードしたファイルを <strong>Google Drive</strong> にドラッグ＆ドロップ
+    </div>
+
+    <div class="recordings-header">録音一覧（MP3）</div>
+    <div class="recordings-list" id="recordingsList">
+      <div class="empty-state">録音がまだありません</div>
+    </div>
+  </div>
+
+  <script>
+    const BAR_COUNT  = 28;
+    const visualizer = document.getElementById('visualizer');
+    const timerEl    = document.getElementById('timer');
+    const statusBar  = document.getElementById('statusBar');
+    const btnRecord  = document.getElementById('btnRecord');
+    const btnPause   = document.getElementById('btnPause');
+    const btnStop    = document.getElementById('btnStop');
+    const list       = document.getElementById('recordingsList');
+
+    const bars = Array.from({ length: BAR_COUNT }, () => {
+      const b = document.createElement('div');
+      b.className = 'bar';
+      visualizer.appendChild(b);
+      return b;
+    });
+
+    function setStatus(msg, type = '') {
+      statusBar.textContent = msg;
+      statusBar.className = 'status-bar' + (type ? ' ' + type : '');
+    }
+
+    let audioCtx = null, analyser = null, processor = null, stream = null;
+    let mp3Encoder = null, mp3Chunks = [];
+    let animFrame = null, timerInterval = null;
+    let elapsedSec = 0, isPaused = false, isRecording = false;
+    let recordings = [], counter = 1;
+
+    const SAMPLE_RATE = 44100, BIT_RATE = 128, CHANNELS = 1;
+
+    function formatTime(s) {
+      return String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
+    }
+    function startTimer() { timerInterval = setInterval(() => { elapsedSec++; timerEl.textContent = formatTime(elapsedSec); }, 1000); }
+    function stopTimer()  { clearInterval(timerInterval); timerInterval = null; }
+
+    function animBars() {
+      if (!analyser) return;
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      analyser.getByteFrequencyData(data);
+      const step = Math.floor(data.length / BAR_COUNT);
+      bars.forEach((b,i) => { b.style.height = Math.max(4, (data[i*step]||0)/255*52) + 'px'; });
+      animFrame = requestAnimationFrame(animBars);
+    }
+    function resetBars() { cancelAnimationFrame(animFrame); bars.forEach(b => b.style.height = '4px'); }
+
+    async function startRecording() {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch(e) {
+        setStatus('マイクへのアクセスが拒否されました', 'error'); return;
+      }
+      audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
+      analyser = audioCtx.createAnalyser(); analyser.fftSize = 256;
+      const src = audioCtx.createMediaStreamSource(stream);
+      src.connect(analyser);
+      processor = audioCtx.createScriptProcessor(4096, CHANNELS, CHANNELS);
+      src.connect(processor);
+      processor.connect(audioCtx.destination);
+
+      mp3Encoder = new lamejs.Mp3Encoder(CHANNELS, SAMPLE_RATE, BIT_RATE);
+      mp3Chunks = [];
+      elapsedSec = 0;
+      timerEl.textContent = '00:00';
+      isRecording = true; isPaused = false;
+
+      processor.onaudioprocess = (e) => {
+        if (isPaused || !isRecording) return;
+        const pcmFloat = e.inputBuffer.getChannelData(0);
+        const pcmInt16 = new Int16Array(pcmFloat.length);
+        for (let i = 0; i < pcmFloat.length; i++) {
+          pcmInt16[i] = Math.max(-32768, Math.min(32767, pcmFloat[i] * 32767));
+        }
+        const encoded = mp3Encoder.encodeBuffer(pcmInt16);
+        if (encoded.length > 0) mp3Chunks.push(new Uint8Array(encoded));
+      };
+
+      timerEl.className = 'timer recording';
+      visualizer.className = 'visualizer recording';
+      btnRecord.classList.add('active');
+      btnPause.disabled = false;
+      btnStop.disabled = false;
+      startTimer(); animBars();
+      setStatus('録音中...');
+    }
+
+    function pauseRecording() {
+      if (!isRecording) return;
+      if (!isPaused) {
+        isPaused = true; stopTimer(); resetBars();
+        timerEl.className = 'timer'; visualizer.className = 'visualizer';
+        document.getElementById('pauseIcon').innerHTML = '<polygon points="5,3 19,12 5,21"/>';
+        setStatus('一時停止中');
+      } else {
+        isPaused = false; startTimer(); animBars();
+        timerEl.className = 'timer recording'; visualizer.className = 'visualizer recording';
+        document.getElementById('pauseIcon').innerHTML = '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>';
+        setStatus('録音中...');
+      }
+    }
+
+    function stopRecording() {
+      if (!isRecording) return;
+      isRecording = false; stopTimer(); resetBars();
+
+      const final = mp3Encoder.flush();
+      if (final.length > 0) mp3Chunks.push(new Uint8Array(final));
+
+      const blob = new Blob(mp3Chunks, { type: 'audio/mpeg' });
+      const url  = URL.createObjectURL(blob);
+
+      processor.disconnect();
+      stream.getTracks().forEach(t => t.stop());
+      audioCtx.close();
+
+      timerEl.className = 'timer'; visualizer.className = 'visualizer';
+      btnRecord.classList.remove('active');
+      btnPause.disabled = true; btnStop.disabled = true;
+      document.getElementById('pauseIcon').innerHTML = '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>';
+
+      const name = '録音 ' + counter++;
+      const now = new Date();
+      const dateStr = (now.getMonth()+1) + '/' + now.getDate() + ' ' +
+        String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+      recordings.push({ id: Date.now(), name, url, blob, duration: elapsedSec, dateStr });
+      renderList();
+      setStatus('録音完了！MP3ダウンロードボタンを押してください', 'ok');
+    }
+
+    function renderList() {
+      if (recordings.length === 0) {
+        list.innerHTML = '<div class="empty-state">録音がまだありません</div>';
+        return;
+      }
+      list.innerHTML = '';
+      [...recordings].reverse().forEach(rec => {
+        const item = document.createElement('div');
+        item.className = 'recording-item';
+        item.innerHTML =
+          '<div class="recording-meta">' +
+            '<span class="recording-name">' + rec.name + '</span>' +
+            '<span>' + rec.dateStr + ' &nbsp;' + formatTime(rec.duration) + '</span>' +
+          '</div>' +
+          '<audio controls src="' + rec.url + '"></audio>' +
+          '<div class="recording-actions">' +
+            '<button class="action-btn dl" data-id="' + rec.id + '" data-action="download">MP3ダウンロード</button>' +
+            '<button class="action-btn" data-id="' + rec.id + '" data-action="rename">名前変更</button>' +
+            '<button class="action-btn delete" data-id="' + rec.id + '" data-action="delete">削除</button>' +
+          '</div>';
+        list.appendChild(item);
+      });
+    }
+
+    list.addEventListener('click', async (e) => {
+      const btn = e.target.closest('[data-action]');
+      if (!btn) return;
+      const id = Number(btn.dataset.id);
+      const rec = recordings.find(r => r.id === id);
+      if (!rec) return;
+
+      if (btn.dataset.action === 'delete') {
+        if (!confirm('「' + rec.name + '」を削除しますか？')) return;
+        URL.revokeObjectURL(rec.url);
+        recordings = recordings.filter(r => r.id !== id);
+        renderList();
+      } else if (btn.dataset.action === 'download') {
+        const a = document.createElement('a');
+        a.href = rec.url; a.download = rec.name + '.mp3'; a.click();
+      } else if (btn.dataset.action === 'rename') {
+        const n = prompt('新しい名前', rec.name);
+        if (n && n.trim()) { rec.name = n.trim(); renderList(); }
+      }
+    });
+
+    btnRecord.addEventListener('click', () => { if (!isRecording) startRecording(); });
+    btnPause.addEventListener('click', pauseRecording);
+    btnStop.addEventListener('click', stopRecording);
+  </script>
+</body>
+</html>
